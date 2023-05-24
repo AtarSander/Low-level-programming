@@ -1,0 +1,567 @@
+#-------------------------------------------------------------------------------
+#author: Aleksander Szymczyk
+#data : 2023.05.22
+#description : barcode 128 set B decoder 
+#-------------------------------------------------------------------------------
+#only 24-bits 600x50 pixels BMP files are supported
+.eqv BMP_FILE_SIZE 90122
+.eqv BYTES_PER_ROW 1800
+	.data
+#space for the 600x50px 24-bits bmp image
+.align 4
+res:	.space 2
+image:	.space BMP_FILE_SIZE
+
+fname:	.asciz "6.bmp"
+error1:	.asciz "Wrong start code (not code set B)" 
+header:	.asciz "\nOutput:\n"
+barcode_mapping:
+    	.word 0x00212222 
+    	.word 0x00222122
+    	.word 0x00222221
+    	.word 0x00121223
+    	.word 0x00121322	
+    	.word 0x00131222 
+    	.word 0x00122213
+    	.word 0x00122312
+    	.word 0x00132212
+    	.word 0x00221213
+    	.word 0x00221312 
+    	.word 0x00231212  
+    	.word 0x00112232 
+    	.word 0x00122132
+    	.word 0x00122231
+    	.word 0x00113222 
+    	.word 0x00123122
+    	.word 0x00123221   
+    	.word 0x00223211   
+    	.word 0x00221132
+    	.word 0x00221231 
+    	.word 0x00213212
+    	.word 0x00223112
+    	.word 0x00312131   
+    	.word 0x00311222
+    	.word 0x00321122
+    	.word 0x00321221
+    	.word 0x00312212
+    	.word 0x00322112
+    	.word 0x00322211     
+    	.word 0x00212123    
+    	.word 0x00212321   
+    	.word 0x00232121    
+    	.word 0x00111323
+    	.word 0x00131123   
+    	.word 0x00131321 
+    	.word 0x00112313
+    	.word 0x00132113    
+    	.word 0x00132311
+    	.word 0x00211313     
+    	.word 0x00231113
+    	.word 0x00231311
+    	.word 0x00112133
+    	.word 0x00112331
+    	.word 0x00132131  
+    	.word 0x00113123
+    	.word 0x00113321
+    	.word 0x00133121   
+    	.word 0x00313121
+    	.word 0x00211331     
+    	.word 0x00231131 
+    	.word 0x00213113 
+    	.word 0x00213311
+    	.word 0x00213131
+    	.word 0x00311123    
+    	.word 0x00311321
+    	.word 0x00331121 
+    	.word 0x00312113 
+    	.word 0x00312311 
+    	.word 0x00332111  
+    	.word 0x00314111
+    	.word 0x00221411
+    	.word 0x00431111
+    	.word 0x00111224
+    	.word 0x00111422  
+    	.word 0x00121124
+    	.word 0x00121421
+    	.word 0x00141122 
+    	.word 0x00141221  
+    	.word 0x00112214   
+    	.word 0x00112412 
+    	.word 0x00122114 
+    	.word 0x00122411
+    	.word 0x00142112
+    	.word 0x00142211       
+    	.word 0x00241211
+    	.word 0x00221114 
+    	.word 0x00413111  
+    	.word 0x00241112
+    	.word 0x00134111
+    	.word 0x00111242       	
+    	.word 0x00121142     	
+    	.word 0x00121241     
+    	.word 0x00114212 
+  	.word 0x00124112
+    	.word 0x00124211
+   	.word 0x00411212  
+    	.word 0x00421112
+   	.word 0x00421211 
+    	.word 0x00212141
+    	.word 0x00214121   
+    	.word 0x00412121    
+    	.word 0x00111143
+    	.word 0x00111341       
+    	.word 0x00131141
+    
+start_B:
+	.word 0x00211214
+stop:
+	.word 0x02331112 
+
+character_mapping:    
+    	.asciz " !\"#$%&\'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~"
+    	
+buf:	
+	.space 100
+	
+	.text
+main:
+	jal	read_bmp
+	li	t0, 0x00000000
+	li	a0, 0	#x
+	li	a1, 25	#y
+	jal     first_black	#find first black pixel
+	li	a4, 6
+	jal	decode		#decode start symbol
+	mv	t0, a0
+	mv	t1, a1	
+	jal	smallest_bar	#find pixel width of the smallest bar
+	mv	a5, a0
+	mv	a0, t0
+	mv	a1, t1
+	li	a2, 2
+	jal	get_code	#get start symbol code
+	la	t0, start_B
+	lw	t1, (t0)
+	bne	t1, a0, wrong_start_code	#check if start symbol is correct
+	jal	decode_characters		#decode the rest of the characters
+	j	print				#print output
+
+wrong_start_code:
+	li	a7, 4
+	la	a0, error1
+	ecall
+	j	exit
+
+print:
+	la	a0, header
+	li	a7, 4
+	ecall
+	sb	zero, (a1)
+	la	a0, buf
+	li	a7, 4
+	ecall
+	
+	
+exit:	li 	a7, 10		#Terminate the program
+	ecall
+# ============================================================================	
+#description: 
+#	Searches for matching barcode value then saves the coresponding character into string
+#arguments:
+#	a3 - x coordinate of the first pixel of current symbol
+#return value:
+#	none
+decode_characters:
+	addi 	sp, sp, -20
+	sw 	s0, 0(sp)	# save ra
+	sw 	s1, 4(sp)	# current symbol index
+	sw 	s2, 8(sp)	# checksum value
+	sw 	s3, 12(sp)	# current width
+	sw 	s4, 16(sp)	# current barcode
+	mv	s0, ra
+	li	s1, 0
+	li	s2, 104
+#Loop through all the symbols
+loop_characters:
+	addi	s1, s1, 1
+	mv	a0, a3
+	li	a4, 6
+	jal	decode
+	li	a2, 2
+	jal	get_code
+	mv	t0, a0		#code in t0
+	la	s4, barcode_mapping
+
+#loop through all the barcodes	
+loop_barcodes:
+	lw	t3, (s4)
+	beq	t3, t0, add_character
+	addi	s4, s4, 4
+	j	loop_barcodes
+
+add_character:
+	li	t2, 4
+	la	t4, barcode_mapping
+	sub	s4, s4, t4
+	div	s4, s4, t2
+	mv	a0, s4
+	mv	a1, s1
+	mv	a2, s2
+	jal	checksum
+	li	t0, 10000000
+	beq	a0, t0, exit_decode	#Check if the code is over
+	mv	s2, a0
+	la	t5, character_mapping
+	add	t5, t5, s4	#get ascii character index
+	lb	t6, (t5)	#load character
+	la	t3, buf	
+	add	t3, t3, s1
+	addi	t3, t3, -1
+	sb	t6, (t3)	#save character
+	j	loop_characters
+
+
+exit_decode:
+	mv	ra, s0
+	la	t0, buf
+	add	a1, s1, t0
+	lw 	s4, 16(sp)	
+	lw 	s3, 12(sp)	
+	lw	s2, 8(sp)
+	lw 	s1, 4(sp)
+	lw	s0, 0(sp)
+	addi	sp, sp, 20
+	jr	ra
+# ============================================================================
+#description: 
+#	Check if current character is a checksum symbol, (if its check if the next one is stop symbol) else calculate checksum
+#arguments:
+#	a0 - character value
+#	a1 - character index
+#	a2 - previous checksum
+#return value:
+#	a0 - 10000000 if current character is checksum, else checksum value
+checksum:
+	addi	sp, sp, -20
+	sw	s0, 0(sp)	#save ra register
+	sw	s1, 4(sp)	#save character value
+	sw	s2, 8(sp)	#save character index
+	sw	s3, 12(sp)	#save previous checksum
+	sw	s4, 16(sp)	#pixel width counter
+	mv	s0, ra
+	mv	s1, a0
+	mv	s2, a1
+	li	t6, 103		#load modulo
+	mv	s3, a2		#
+	rem	a2, a2, t6
+	beq	a0, a2 check_stop
+not_stop:
+	mv	a0, s1
+	mul	a0, a0, s2	#calculate data value times index
+	add	a0, s3, a0	#add to checksum
+	mv	ra, s0
+	lw	s4, 16 (sp)
+	lw	s3, 12(sp)
+	lw	s2, 8(sp)
+	lw	s1, 4(sp)
+	lw	s0, 0(sp)
+	addi	sp, sp, 20
+	jr	ra
+	
+	
+check_stop:
+	mv	t4, a0		
+	mv	s4, a3
+	mv	a0, a3
+	li	a4, 7		
+	jal	decode
+	li	a2, 3
+	jal	get_code	#decode stop symbol candidate
+	la	t0, stop	
+	lw	t3, (t0)
+	mv	a3, s4
+	bne	a0, t3, not_stop	#check if the candidate is the stop symbol
+	
+equal:
+	mv	ra, s0
+	lw	s4, 16 (sp)
+	lw	s3, 12(sp)
+	lw	s2, 8(sp)
+	lw	s1, 4(sp)
+	lw	s0, 0(sp)
+	addi	sp, sp, 20
+	li	a0, 10000000
+	jr	ra
+
+# ============================================================================	
+#description: 
+#	Divide the code by smallest width pixel value, save it into one register
+#arguments:
+#	a0 - first four bars and spaces
+#	a1 - last two bars and spaces
+#	a2 - second register size (normal symbol or stop)
+#	a5 - smallest bar or space pixel width
+#return value:
+#	a0 - character code value
+get_code:
+	mv	t6, ra		#save ra register
+	li	t0, 0
+	li	t1, 0
+	li	t3, 0
+	li	t4, 4
+	mv	t5, a2		#load second register size
+
+loop_code_a0:
+    	andi 	t2, a0, 0xFF	#get least significant byte
+	srli	a0, a0, 8
+	div	t2, t2, a5	#divide by minimal pixel length
+	or 	t0, t0, t2
+	slli	t0, t0, 4
+	addi	t3, t3, 4    
+	addi    t4, t4, -1      
+	bne     t4, zero, loop_code_a0
+
+loop_code_a1:
+	andi 	t2, a1, 0xFF	#get least significant byte
+	srli	a1, a1, 8
+	div	t2, t2, a5
+	or 	t0, t0, t2
+	slli	t0, t0, 4
+	addi	t3, t3, 4
+	addi	t5, t5, -1
+	bne	t5, zero, loop_code_a1
+	
+end_code:
+	srli	t0, t0, 4
+	mv	a0, t0
+	mv	ra, t6
+	jr	ra
+# ============================================================================	
+#description: 
+#	Get smallest width bar or space pixel value
+#arguments:
+#	a0 - first four bars and spaces
+#	a1 - last two bars and spaces
+#return value:
+#	a0 - smallest bar or space pixel width
+smallest_bar:
+	mv	t5, ra
+	li	t3, 3
+	li	t4, 2
+	andi 	t6, a0, 0xFF  #current biggest
+
+check_a0:
+	beq	t3, zero, check_a1
+	srli	a0, a0, 8
+	andi 	t2, a0, 0xFF
+	addi	t3, t3, -1
+	bgt	t2, t6, check_a0	#check if greater
+switch:
+	mv	t6, t2
+	j	check_a0
+
+check_a1:
+	beq	t4, zero, get_smallest_bar
+	andi 	t2, a0, 0xFF
+	srli	a1, a1, 8
+	addi	t4, t4, -1
+	bgt	t2, t6, check_a1	#check if greater
+switch2:
+	mv	t6, t2
+	j	check_a1
+
+get_smallest_bar:
+	mv	a0, t6
+	mv	ra, t5
+	jr	ra	
+# ============================================================================	
+#description: 
+#	Count pixel width of one symbol bars and spaces
+#arguments:
+#	a0 - starting x coordinate
+#	a4 - bars+spaces count
+#return value:
+#	a0 - first four bars and spaces (litlle endian)
+#	a1 - last two bars and spaces (litlle endian)
+#	a3 - end x coordinate
+decode:
+	addi 	sp, sp, -24
+	sw 	s0, 0(sp) 	#width counter
+	sw 	s1, 4(sp) 	#first four bars and spaces
+	sw	s2, 8(sp) 	#last 2 (3) bars and spaces
+	sw	s3, 12(sp)	#saved ra register
+	sw	s4, 16(sp)	#shift value s1
+	sw	s5, 20(sp)	#shift value s2
+	mv	s0, a0
+	mv	s3, ra
+	li	s1, 0
+	li	s2, 0
+	li	t5, 1 		#black current bar pixels counter 
+	li	t6, 1		#white current space pixels counter
+	li	s4, 0
+	li	s5, 0
+
+bar:
+	beqz	a4, end
+	addi	s0, s0, 1
+	mv	a0, s0
+	li	a1, 25
+	jal	get_pixel
+	mv	t1, a0
+	li	t0, 0x00000000
+	beq	t1, t0, add_black
+	mv	t1, t5
+	srli 	t0, s1, 24	
+	bnez	t0, save_bar_s2	#check if most significant byte is empty
+	sll 	t1, t1, s4
+	or	s1, s1, t1	
+	li      t5, 1		#reset black pixel counter
+	addi	a4, a4, -1
+	addi	s4, s4, 8
+
+space:
+	beqz	a4, end
+	addi	s0, s0, 1
+	mv	a0, s0
+	li	a1, 25
+	jal	get_pixel
+	mv	t1, a0
+	li	t0, 0x00000000
+	bne	t1, t0, add_white
+	mv	t1, t6
+	srli 	t0, s1, 24	
+	bnez	t0, save_space_s2	#check if most significant byte is empty	
+	sll 	t1, t1, s4
+	or 	s1, s1, t1
+	li	t6, 1 		#reset white pixel counter
+	addi	a4, a4, -1
+	addi	s4, s4, 8
+	j	bar
+
+save_bar_s2:
+	sll 	t1, t1, s5
+	or	s2, s2, t1
+	li      t5, 1		#reset black pixel counter
+	addi	a4, a4, -1
+	addi	s5, s5, 8
+	j	space
+	
+save_space_s2:
+	sll 	t1, t1, s5
+	or	s2, s2, t1
+	li      t6, 1		#reset white pixel counter
+	addi	a4, a4, -1
+	addi	s5, s5, 8
+	j	bar
+
+end:
+	mv	a0, s1
+	mv	a1, s2
+	mv	a3, s0
+	mv	ra, s3
+	lw	s5, 20(sp)
+	lw 	s4, 16(sp)
+	lw	s3, 12(sp)
+	lw 	s2, 8(sp)
+	lw 	s1, 4(sp)
+	lw 	s0, 0(sp)		
+	addi 	sp, sp, 24
+   	jr 	ra
+   
+add_black:
+	addi	t5, t5, 1
+	j	bar
+
+add_white:
+	addi	t6, t6, 1
+	j	space
+# ============================================================================
+#description: 
+#	Loop until you find first black pixel
+#arguments:
+#	a0 - x coordinate
+#	a1 - y coordinate
+#return value:
+#	a0 - x coordinate of the first black pixel
+first_black:
+	mv	t6, ra
+loop_first_black:		
+	mv	t5, a0
+	jal	get_pixel
+	mv	t1, a0
+	beq	t1, t0, return_position
+	addi	t5, t5, 1
+	mv	a0, t5
+	j	loop_first_black
+
+return_position:
+	mv	a0, t5
+	mv	ra, t6
+	jr	ra	
+# ============================================================================	
+read_bmp:
+#description: 
+#	reads the contents of a bmp file into memory
+#arguments:
+#	none
+#return value: none
+	addi sp, sp, -4		#push $s1
+	sw s1, 0(sp)
+#open file
+	li a7, 1024
+        la a0, fname		#file name 
+        li a1, 0		#flags: 0-read file
+        ecall
+	mv s1, a0      # save the file descriptor
+	
+#read file
+	li a7, 63
+	mv a0, s1
+	la a1, image
+	li a2, BMP_FILE_SIZE
+	ecall
+
+#close file
+	li a7, 57
+	mv a0, s1
+        ecall
+	
+	lw s1, 0(sp)		#restore (pop) s1
+	addi sp, sp, 4
+	jr ra
+# ============================================================================
+
+get_pixel:
+#description: 
+#	returns color of specified pixel
+#arguments:
+#	a0 - x coordinate
+#	a1 - y coordinate - (0,0) - bottom left corner
+#return value:
+#	a0 - 0RGB - pixel color
+	la t1, image		#adress of file offset to pixel array
+	addi t1,t1,10
+	lw t2, (t1)		#file offset to pixel array in $t2
+	la t1, image		#adress of bitmap
+	add t2, t1, t2		#adress of pixel array in $t2
+	
+	#pixel address calculation
+	li t4,BYTES_PER_ROW
+	mul t1, a1, t4 		#t1= y*BYTES_PER_ROW
+	mv t3, a0		
+	slli a0, a0, 1
+	add t3, t3, a0		#$t3= 3*x
+	add t1, t1, t3		#$t1 = 3x + y*BYTES_PER_ROW
+	add t2, t2, t1		#pixel address 
+	
+	#get color
+	lbu a0,(t2)		#load B
+	lbu t1,1(t2)		#load G
+	slli t1,t1,8
+	or a0, a0, t1
+	lbu t1,2(t2)		#load R
+        slli t1,t1,16
+	or a0, a0, t1
+					
+	jr ra
+# ============================================================================

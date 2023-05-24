@@ -1,0 +1,52 @@
+	.data
+prompt:	.asciz "Enter string:\n"
+header:	.asciz "\nOutput:\n"
+buf:	.space 100
+	.text
+main:	
+	li	a7, 4
+	la	a0, prompt
+	ecall
+	li	a7, 8
+	la	a0, buf
+	li	a1, 100
+	ecall
+	la	t0, buf
+	li	t1, 1
+	li	t2, 'a'
+	li	t3, 'z'
+	li	t4, 0x20
+	li	t6, 3
+loop:
+	lbu	t5, (t0)
+	beqz	t5, end
+	bge	t5, t2, check
+	addi	t0, t0, 1
+	b	loop
+
+check:
+	ble	t5, t3, small
+	addi	t0, t0, 1
+	b	loop
+		
+small:
+	beq	t1, t6, change
+	addi	t1, t1, 1
+	addi	t0, t0, 1
+	b	loop
+
+change:
+	li	t1, 1
+	sub	t5, t5, t4
+	sb	t5, (t0)
+	addi 	t0, t0, 1
+	b	loop
+end:
+	li	a7, 4
+	la	a0, header
+	ecall
+	li	a7, 4
+	la	a0, buf
+	ecall
+	li	a7, 10
+	ecall

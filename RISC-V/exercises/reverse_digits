@@ -1,0 +1,55 @@
+	.data
+buf:	.space 100
+num:	.space 50
+	.text
+main:
+	li	a7, 8
+	la	a0, buf
+	li	a1, 100
+	ecall
+	la	t0, buf	#pointer end
+	la	t1, num
+	la	t4, buf
+	li	t5, '0'
+	li	t6, '9'
+loop:
+	lbu	t3, (t0)
+	beqz	t3, set
+	bge	t3, t5, check
+	addi	t0, t0, 1
+	b	loop
+
+check:
+	ble	t3, t6, save
+	addi	t0, t0, 1
+	b	loop
+save:	
+	sb	t3, (t1)
+	addi	t1, t1, 1
+	addi	t0, t0, 1
+	b	loop
+set:
+	li	t0, 1
+	b	reverse
+reverse:
+	lbu	t3, (t4)
+	beqz	t3, end
+	bge	t3, t5, check2
+	addi	t4, t4, 1
+	b	reverse
+check2:
+	ble	t3, t6, replace
+	addi	t4, t4, 1
+	b	reverse
+replace:
+	addi	t1, t1, -1
+	lbu	t3, (t1)
+	sb	t3, (t4)
+	addi	t4, t4, 1
+	b	reverse
+end:
+	li	a7, 4
+	la	a0, buf
+	ecall
+	li	a7, 10
+	ecall

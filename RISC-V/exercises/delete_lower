@@ -1,0 +1,33 @@
+	.data
+buf:	.space 100
+	.text
+main:
+	li	a7, 8
+	la	a0, buf
+	li	a1, 100
+	ecall
+	la	t0, buf
+	la	t1, buf
+	la	t5, buf
+	li	t2, 'a'
+	li	t3, 'z'
+loop:
+	lbu	t4, (t0)
+	beqz	t4, end
+	blt	t4, t2, write
+	bgt	t4, t3, write
+	addi	t0, t0, 1
+	b	loop
+write:
+	sb	t4, (t1)
+	addi	t1, t1, 1
+	addi	t0, t0, 1
+	b	loop
+end:
+	sb	zero, (t1)
+	sub	t5, t0, t5
+	li	a7, 4
+	la	a0, buf
+	ecall
+	li	a7, 10
+	ecall	
